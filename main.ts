@@ -49,7 +49,11 @@ const fetchWithTimeout = async (
       })
     }
 
-    throw error
+    // any non-abort failure here means the upstream couldn't be reached
+    console.error(`failed to reach ${url}:`, error)
+    return new Response("Bad Gateway", {
+      status: 502,
+    })
   }
 }
 
