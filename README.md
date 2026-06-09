@@ -11,7 +11,7 @@ This project is sponsored by [ChatWise](https://chatwise.app), the fastest AI ch
 Replace your API domain with the domain of the proxy deployed on your server. For example:
 
 - Gemini:
-  - from `https://generativelanguage.googleapis.com/v1beta` 
+  - from `https://generativelanguage.googleapis.com/v1beta`
   - to`https://your-proxy/generativelanguage/v1beta`
 - OpenAI:
   - from `https://api.openai.com/v1`
@@ -37,7 +37,32 @@ Replace your API domain with the domain of the proxy deployed on your server. Fo
 - Cerebras:
   - from `https://api.cerebras.ai`
   - to `https://your-proxy/cerebras`
- 
+- fal.ai:
+  - from `https://fal.run` (sync inference) to `https://your-proxy/fal`
+  - from `https://queue.fal.run` (queue) to `https://your-proxy/fal-queue`
+  - from `https://api.fal.ai` (platform API) to `https://your-proxy/fal-api`
+  - from `https://rest.fal.ai` (realtime tokens, JWKS) to `https://your-proxy/fal-rest`
+  - from `https://v3.fal.media` (file CDN) to `https://your-proxy/fal-media`
+- Kling AI:
+  - global: from `https://api-singapore.klingai.com` to `https://your-proxy/kling`
+  - China: from `https://api-beijing.klingai.com` to `https://your-proxy/kling-cn`
+- Black Forest Labs (FLUX):
+  - from `https://api.bfl.ai` to `https://your-proxy/bfl`
+  - EU region: from `https://api.eu.bfl.ai` to `https://your-proxy/bfl-eu`
+  - US region: from `https://api.us.bfl.ai` to `https://your-proxy/bfl-us`
+- ElevenLabs:
+  - from `https://api.elevenlabs.io` to `https://your-proxy/elevenlabs`
+  - EU residency: from `https://api.eu.residency.elevenlabs.io` to `https://your-proxy/elevenlabs-eu`
+  - India residency: from `https://api.in.residency.elevenlabs.io` to `https://your-proxy/elevenlabs-in`
+
+### Notes on media providers (fal.ai, Kling, BFL, ElevenLabs)
+
+- Authentication headers are passed through as-is: fal.ai `Authorization: Key ...`, Kling `Authorization: Bearer <JWT>` (signed client-side from AccessKey/SecretKey), BFL `x-key`, ElevenLabs `xi-api-key`.
+- WebSocket endpoints are not proxied (fal `wss://ws.fal.run` and `wss://fal.run/{app}/realtime`, ElevenLabs realtime TTS/STT and Agents). Connect to the upstream hosts directly for those.
+- Some responses contain absolute upstream URLs which bypass the proxy when followed: fal queue `status_url`/`response_url`/`cancel_url`, BFL `polling_url` (may point to a regional cluster), result file links (fal.media, BFL delivery URLs, Kling CDN).
+- Webhooks (fal `?fal_webhook=`, Kling `callback_url`, BFL `webhook_url`) are delivered by the provider directly to your callback host, not through this proxy.
+- Long-running synchronous requests are supported: up to 10 minutes for `/fal` (sync video generation) and 5 minutes for `/elevenlabs` (speech-to-text on long audio). Prefer the queue/async APIs in production.
+
 ## Hosted by ChatWise
 
 Use the hosted API, for example OpenAI `https://ai-proxy.chatwise.app/openai/v1`
