@@ -27,6 +27,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .cache
 *.tsbuildinfo
 
+# scratch files
+.tmp/
+
 # IntelliJ based IDEs
 .idea
 

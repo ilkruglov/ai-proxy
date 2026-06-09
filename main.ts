@@ -55,7 +55,18 @@ const fetchWithTimeout = async (
 
 const DEFAULT_TIMEOUT = 60000
 
-const proxies: {
+export const isForwardableHeader = (name: string) => {
+  const k = name.toLowerCase()
+  return (
+    !k.startsWith("cf-") &&
+    !k.startsWith("x-forwarded-") &&
+    !k.startsWith("cdn-") &&
+    k !== "x-real-ip" &&
+    k !== "host"
+  )
+}
+
+export const proxies: {
   pathSegment: string
   target: string
   orHostname?: string
@@ -127,6 +138,10 @@ const proxies: {
   {
     pathSegment: "fal-media",
     target: "https://v3.fal.media",
+  },
+  {
+    pathSegment: "fal-ws",
+    target: "https://ws.fal.run",
   },
   {
     pathSegment: "kling",
@@ -203,14 +218,7 @@ app.use(async (c, next) => {
     headers.set("host", new URL(proxy.target).hostname)
 
     c.req.raw.headers.forEach((value, key) => {
-      const k = key.toLowerCase()
-      if (
-        !k.startsWith("cf-") &&
-        !k.startsWith("x-forwarded-") &&
-        !k.startsWith("cdn-") &&
-        k !== "x-real-ip" &&
-        k !== "host"
-      ) {
+      if (isForwardableHeader(key)) {
         headers.set(key, value)
       }
     })

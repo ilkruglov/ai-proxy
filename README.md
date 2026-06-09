@@ -43,6 +43,7 @@ Replace your API domain with the domain of the proxy deployed on your server. Fo
   - from `https://api.fal.ai` (platform API) to `https://your-proxy/fal-api`
   - from `https://rest.fal.ai` (realtime tokens, JWKS) to `https://your-proxy/fal-rest`
   - from `https://v3.fal.media` (file CDN) to `https://your-proxy/fal-media`
+  - from `wss://ws.fal.run` (HTTP-over-WebSockets) to `wss://your-proxy/fal-ws`
 - Kling AI:
   - global: from `https://api-singapore.klingai.com` to `https://your-proxy/kling`
   - China: from `https://api-beijing.klingai.com` to `https://your-proxy/kling-cn`
@@ -58,7 +59,8 @@ Replace your API domain with the domain of the proxy deployed on your server. Fo
 ### Notes on media providers (fal.ai, Kling, BFL, ElevenLabs)
 
 - Authentication headers are passed through as-is: fal.ai `Authorization: Key ...`, Kling `Authorization: Bearer <JWT>` (signed client-side from AccessKey/SecretKey), BFL `x-key`, ElevenLabs `xi-api-key`.
-- WebSocket endpoints are not proxied (fal `wss://ws.fal.run` and `wss://fal.run/{app}/realtime`, ElevenLabs realtime TTS/STT and Agents). Connect to the upstream hosts directly for those.
+- WebSocket endpoints are proxied transparently by the Node server (`server.ts`) via raw upgrade passthrough: fal `wss://your-proxy/fal-ws/{model_id}` and `wss://your-proxy/fal/{app}/realtime`, ElevenLabs realtime TTS/STT and Agents via `wss://your-proxy/elevenlabs/...`. Deployments that run `main.ts` on other runtimes (e.g. edge workers) do not get WS support.
+- Running behind an egress HTTP proxy (e.g. a local VPN): WebSocket passthrough honors `https_proxy` automatically (CONNECT tunnel); for regular HTTP routes set `NODE_USE_ENV_PROXY=1` (Node 24+) so `fetch` honors it too.
 - Some responses contain absolute upstream URLs which bypass the proxy when followed: fal queue `status_url`/`response_url`/`cancel_url`, BFL `polling_url` (may point to a regional cluster), result file links (fal.media, BFL delivery URLs, Kling CDN).
 - Webhooks (fal `?fal_webhook=`, Kling `callback_url`, BFL `webhook_url`) are delivered by the provider directly to your callback host, not through this proxy.
 - Long-running synchronous requests are supported: up to 10 minutes for `/fal` (sync video generation) and 5 minutes for `/elevenlabs` (speech-to-text on long audio). Prefer the queue/async APIs in production.
