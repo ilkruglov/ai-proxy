@@ -9,7 +9,14 @@ const app = new Hono()
 
 app.use(cors())
 
-app.use(logger())
+app.use(
+  logger((str) => {
+    // hono's logger prints the path including the query string — strip
+    // it so client credentials passed as query params (e.g. Gemini
+    // ?key=, ElevenLabs ?token=) stay out of the logs
+    console.log(str.replace(/\?\S+/g, ""))
+  }),
+)
 
 app.use(async (c, next) => {
   await next()
@@ -49,8 +56,17 @@ const fetchWithTimeout = async (
       })
     }
 
-    // any non-abort failure here means the upstream couldn't be reached
-    console.error(`failed to reach ${url}:`, error)
+    // any non-abort failure here means the upstream couldn't be reached;
+    // log without url.search and without the raw error object — query
+    // strings (e.g. Gemini ?key=) and undici error messages can carry
+    // client credentials
+    const { origin, pathname } = new URL(url)
+    const cause =
+      error instanceof Error ? ((error.cause as Error) ?? error) : undefined
+    const reason = cause
+      ? ((cause as { code?: string }).code ?? cause.name)
+      : String(error)
+    console.error(`failed to reach ${origin}${pathname}: ${reason}`)
     return new Response("Bad Gateway", {
       status: 502,
     })
