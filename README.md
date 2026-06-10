@@ -32,7 +32,7 @@ Replace your API domain with the domain of the proxy deployed on your server. Fo
   - from `https://openrouter.ai/api`
   - to `https://your-proxy/openrouter`
 - xAI:
-  - from `https://api.xai.ai`
+  - from `https://api.x.ai`
   - to `https://your-proxy/xai`
 - Cerebras:
   - from `https://api.cerebras.ai`
@@ -60,10 +60,22 @@ Replace your API domain with the domain of the proxy deployed on your server. Fo
 
 - Authentication headers are passed through as-is: fal.ai `Authorization: Key ...`, Kling `Authorization: Bearer <JWT>` (signed client-side from AccessKey/SecretKey), BFL `x-key`, ElevenLabs `xi-api-key`.
 - WebSocket endpoints are proxied transparently by the Node server (`server.ts`) via raw upgrade passthrough: fal `wss://your-proxy/fal-ws/{model_id}` and `wss://your-proxy/fal/{app}/realtime`, ElevenLabs realtime TTS/STT and Agents via `wss://your-proxy/elevenlabs/...`. Deployments that run `main.ts` on other runtimes (e.g. edge workers) do not get WS support.
-- Running behind an egress HTTP proxy (e.g. a local VPN): WebSocket passthrough honors `https_proxy` automatically (CONNECT tunnel); for regular HTTP routes set `NODE_USE_ENV_PROXY=1` (Node 24+) so `fetch` honors it too.
+- Running behind an egress HTTP proxy (e.g. a local VPN): WebSocket passthrough honors `https_proxy` automatically (CONNECT tunnel, including `user:pass@` Basic auth and `https://` proxies); for regular HTTP routes set `NODE_USE_ENV_PROXY=1` (Node 24+) so `fetch` honors it too.
 - Some responses contain absolute upstream URLs which bypass the proxy when followed: fal queue `status_url`/`response_url`/`cancel_url`, BFL `polling_url` (may point to a regional cluster), result file links (fal.media, BFL delivery URLs, Kling CDN).
 - Webhooks (fal `?fal_webhook=`, Kling `callback_url`, BFL `webhook_url`) are delivered by the provider directly to your callback host, not through this proxy.
 - Long-running synchronous requests are supported: up to 10 minutes for `/fal` (sync video generation) and 5 minutes for `/elevenlabs` (speech-to-text on long audio). Prefer the queue/async APIs in production.
+
+### Custom routes
+
+Extra routes can be added without a code change via the `EXTRA_PROXIES` environment variable:
+
+```bash
+EXTRA_PROXIES='[{"pathSegment":"foo","target":"https://api.foo.example","timeout":120000}]'
+```
+
+### Authentication
+
+By default the proxy is open. Set `PROXY_AUTH_TOKEN` to require a shared secret on every request (HTTP and WebSocket) in the `x-proxy-token` header; the header is stripped before forwarding. The root path `/` stays open for health checks. Strongly recommended when exposing the proxy publicly — `/custom-model-proxy` can relay requests to arbitrary URLs.
 
 ## Hosted by ChatWise
 
@@ -71,7 +83,27 @@ Use the hosted API, for example OpenAI `https://ai-proxy.chatwise.app/openai/v1`
 
 ## Deployment
 
-Deploy this as a Docker container, check out [Dockerfile](./Dockerfile).
+Deploy this as a Docker container, check out [Dockerfile](./Dockerfile):
+
+```bash
+docker build -t ai-proxy .
+docker run -d --name ai-proxy --restart unless-stopped \
+  -p 3000:3000 \
+  -e PROXY_AUTH_TOKEN=change-me \
+  ai-proxy
+```
+
+The image has a built-in health check on `/`.
+
+## Development
+
+```bash
+bun install
+bun run dev          # dev server with reload (tsx, node runtime)
+bun test             # test suite (incl. e2e of the production build)
+bun run typecheck    # tsc --noEmit
+bun run format       # prettier
+```
 
 ## License
 

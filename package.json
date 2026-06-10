@@ -5,7 +5,11 @@
   "scripts": {
     "start": "node ./dist/server.js",
     "dev": "bunx tsx --watch ./server.ts",
-    "build": "bun build ./server.ts ./main.ts --outdir dist --packages external"
+    "build": "bun build ./server.ts ./main.ts --outdir dist --packages external",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "devDependencies": {
     "@types/bun": "latest",
@@ -13,7 +17,7 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@hono/node-server": "^1.14.0",
+    "@hono/node-server": "^1.19.14",
     "@hono/zod-validator": "^0.4.3",
     "hono": "^4.7.5",
     "zod": "^3.24.2"

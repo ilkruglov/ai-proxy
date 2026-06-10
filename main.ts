@@ -25,6 +25,21 @@ app.use(async (c, next) => {
 
 app.get("/", (c) => c.text("A proxy for AI!"))
 
+// Optional shared-secret gate: when PROXY_AUTH_TOKEN is set, every request
+// (including /custom-model-proxy, which can relay anywhere) must carry it
+// in the x-proxy-token header. Read per request so tests can toggle it.
+export const isAuthorized = (token: string | string[] | undefined) => {
+  const required = process.env.PROXY_AUTH_TOKEN
+  return !required || token === required
+}
+
+app.use(async (c, next) => {
+  if (!isAuthorized(c.req.header("x-proxy-token"))) {
+    return c.text("Unauthorized", 401)
+  }
+  await next()
+})
+
 const fetchWithTimeout = async (
   url: string,
   { timeout, ...options }: RequestInit & { timeout: number },
@@ -82,8 +97,23 @@ export const isForwardableHeader = (name: string) => {
     !k.startsWith("x-forwarded-") &&
     !k.startsWith("cdn-") &&
     k !== "x-real-ip" &&
-    k !== "host"
+    k !== "host" &&
+    // the proxy's own auth secret must never reach the upstream
+    k !== "x-proxy-token"
   )
+}
+
+// Build the upstream headers: drop infra/proxy-internal ones and set Host
+// from the target (incl. port for non-default ports).
+const buildForwardHeaders = (incoming: Headers, target: URL) => {
+  const headers = new Headers()
+  headers.set("host", target.host)
+  incoming.forEach((value, key) => {
+    if (isForwardableHeader(key)) {
+      headers.set(key, value)
+    }
+  })
+  return headers
 }
 
 export const proxies: {
@@ -200,6 +230,41 @@ export const proxies: {
   },
 ]
 
+// extra routes from the environment without a code change, e.g.
+// EXTRA_PROXIES='[{"pathSegment":"foo","target":"https://api.foo.example"}]'
+if (process.env.EXTRA_PROXIES) {
+  let extra: unknown
+  try {
+    extra = JSON.parse(process.env.EXTRA_PROXIES)
+  } catch (error) {
+    // don't echo the raw value — a target may embed credentials
+    throw new Error(
+      `EXTRA_PROXIES is not valid JSON: ${(error as Error).message}`,
+    )
+  }
+  if (!Array.isArray(extra)) {
+    throw new Error("EXTRA_PROXIES must be a JSON array")
+  }
+  for (const entry of extra) {
+    if (
+      typeof entry?.pathSegment !== "string" ||
+      typeof entry?.target !== "string"
+    ) {
+      throw new Error(
+        "EXTRA_PROXIES entries must be objects with string pathSegment and target",
+      )
+    }
+    try {
+      new URL(entry.target)
+    } catch {
+      throw new Error(
+        `EXTRA_PROXIES entry "${entry.pathSegment}" has an invalid target URL`,
+      )
+    }
+  }
+  proxies.push(...(extra as typeof proxies))
+}
+
 app.post(
   "/custom-model-proxy",
   zValidator(
@@ -211,10 +276,14 @@ app.post(
   async (c) => {
     const { url } = c.req.valid("query")
 
-    const res = await proxy(url, {
+    // same hardening as the path-prefix route: filtered headers (no
+    // x-proxy-token / infra leak to the arbitrary target), timeout, and
+    // 502/504 instead of a raw 500
+    const res = await fetchWithTimeout(url, {
       method: c.req.method,
       body: c.req.raw.body,
-      headers: c.req.raw.headers,
+      headers: buildForwardHeaders(c.req.raw.headers, new URL(url)),
+      timeout: DEFAULT_TIMEOUT,
     })
 
     return new Response(res.body, {
@@ -234,14 +303,10 @@ app.use(async (c, next) => {
   )
 
   if (proxy) {
-    const headers = new Headers()
-    headers.set("host", new URL(proxy.target).hostname)
-
-    c.req.raw.headers.forEach((value, key) => {
-      if (isForwardableHeader(key)) {
-        headers.set(key, value)
-      }
-    })
+    const headers = buildForwardHeaders(
+      c.req.raw.headers,
+      new URL(proxy.target),
+    )
 
     const targetUrl = `${proxy.target}${url.pathname.replace(
       `/${proxy.pathSegment}/`,
@@ -261,7 +326,7 @@ app.use(async (c, next) => {
     })
   }
 
-  next()
+  await next()
 })
 
 export default app

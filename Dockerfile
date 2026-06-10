@@ -1,42 +1,36 @@
-# syntax=docker/dockerfile:1
-
 # Build Stage
-FROM node:22-slim AS builder
+FROM node:24-slim AS builder
 WORKDIR /app
-RUN npm i -g bun
+RUN npm i -g bun@1.3.6
 
-# Copy package files and install dependencies
-COPY package*.json ./
-RUN bun i
+# Install dependencies from the lockfile
+COPY package.json bun.lock ./
+RUN bun i --frozen-lockfile
 
-# Copy the rest of the application source code
+# Copy the rest of the application source code and build
 COPY . .
-
-# Build the TypeScript project
-# Assumes you have a "build" script in your package.json, e.g., "tsc -p tsconfig.json"
 RUN bun run build
 
+# Production-only dependencies, assembled here so the runtime image needs no bun
+RUN bun i --prod --frozen-lockfile
+
 # Production Stage
-FROM node:22-slim AS production
+FROM node:24-slim AS production
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y \
-    curl
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/*
 
-RUN npm i -g bun
-
-# Copy package.json
 COPY package.json ./
-
-# Install production dependencies only
-RUN bun i --prod
-
-# Copy built code from the builder stage
+COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 
 ENV NODE_ENV=production
 ENV PORT=3000
 
-# Command to run the application
-# Assumes your entry point after build is dist/main.js
-CMD ["bun", "start"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD curl -fsS "http://127.0.0.1:${PORT}/" || exit 1
+
+# node directly as PID 1 so the container reacts to SIGTERM promptly
+CMD ["node", "./dist/server.js"]
