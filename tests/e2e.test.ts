@@ -305,6 +305,37 @@ describe("EXTRA_PROXIES validation", () => {
   })
 })
 
+describe("resource limits (e2e)", () => {
+  test("rejects bodies over MAX_BODY_BYTES with 413", async () => {
+    const server = await spawnServer({ MAX_BODY_BYTES: "1000" })
+    servers.push(server)
+    const res = await fetch(`http://127.0.0.1:${server.port}/test-ws/x`, {
+      method: "POST",
+      body: "a".repeat(5000),
+    })
+    expect(res.status).toBe(413)
+  })
+
+  test("closes idle WebSocket tunnels after WS_IDLE_TIMEOUT_MS", async () => {
+    const server = await spawnServer({ WS_IDLE_TIMEOUT_MS: "400" })
+    servers.push(server)
+    const closedWithin = await new Promise<boolean>((resolve) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${server.port}/test-ws/`)
+      const timer = setTimeout(() => resolve(false), 3000)
+      // never send anything; the proxy should drop the idle tunnel
+      ws.onclose = () => {
+        clearTimeout(timer)
+        resolve(true)
+      }
+      ws.onerror = () => {
+        clearTimeout(timer)
+        resolve(true)
+      }
+    })
+    expect(closedWithin).toBe(true)
+  })
+})
+
 describe("PROXY_AUTH_TOKEN gate on upgrades (e2e)", () => {
   test("rejects a missing token, accepts the right one", async () => {
     const denied = await rawRequest(authedPort, upgradePayload("/test-ws/"))

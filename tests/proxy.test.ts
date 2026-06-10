@@ -193,6 +193,14 @@ describe("PROXY_AUTH_TOKEN gate", () => {
 })
 
 describe("custom-model-proxy", () => {
+  // the upstream is on loopback, which the SSRF guard blocks by default
+  beforeAll(() => {
+    process.env.CUSTOM_MODEL_PROXY_ALLOW_PRIVATE = "1"
+  })
+  afterAll(() => {
+    delete process.env.CUSTOM_MODEL_PROXY_ALLOW_PRIVATE
+  })
+
   test("proxies to the url query param", async () => {
     const target = encodeURIComponent(
       `http://127.0.0.1:${upstreamPort}/v1/custom`,
@@ -228,5 +236,36 @@ describe("custom-model-proxy", () => {
     } finally {
       delete process.env.PROXY_AUTH_TOKEN
     }
+  })
+})
+
+describe("custom-model-proxy SSRF guard", () => {
+  test("blocks loopback targets by default", async () => {
+    const target = encodeURIComponent(`http://127.0.0.1:${upstreamPort}/x`)
+    const res = await app.request(`/custom-model-proxy?url=${target}`, {
+      method: "POST",
+      body: "{}",
+    })
+    expect(res.status).toBe(403)
+    expect(await res.text()).toContain("private")
+  })
+
+  test("blocks RFC1918 and link-local literals", async () => {
+    for (const host of ["http://10.0.0.5/x", "http://169.254.169.254/x"]) {
+      const res = await app.request(
+        `/custom-model-proxy?url=${encodeURIComponent(host)}`,
+        { method: "POST", body: "{}" },
+      )
+      expect(res.status).toBe(403)
+    }
+  })
+
+  test("blocks non-http(s) schemes", async () => {
+    const res = await app.request(
+      `/custom-model-proxy?url=${encodeURIComponent("ftp://example.com/x")}`,
+      { method: "POST", body: "{}" },
+    )
+    // zod's .url() may reject some schemes (400) before us; either is a refusal
+    expect([400, 403]).toContain(res.status)
   })
 })

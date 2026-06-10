@@ -4,6 +4,9 @@ import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { logger } from "hono/logger"
 import { proxy } from "hono/proxy"
+import { bodyLimit } from "hono/body-limit"
+import { lookup } from "node:dns/promises"
+import { isIP } from "node:net"
 
 const app = new Hono()
 
@@ -89,6 +92,65 @@ const fetchWithTimeout = async (
 }
 
 const DEFAULT_TIMEOUT = 60000
+
+// cap the proxied request body to avoid memory/bandwidth exhaustion; generous
+// by default so base64 images / audio for the media providers still go through
+const MAX_BODY_BYTES = Number(process.env.MAX_BODY_BYTES || 100 * 1024 * 1024)
+
+app.use(
+  bodyLimit({
+    maxSize: MAX_BODY_BYTES,
+    onError: (c) => c.text("Payload Too Large", 413),
+  }),
+)
+
+// Is an IP literal in a loopback / private / link-local / reserved range?
+const isPrivateIp = (ip: string): boolean => {
+  const v = ip.replace(/^::ffff:/i, "") // unwrap IPv4-mapped IPv6
+  if (isIP(v) === 4) {
+    const [a, b] = v.split(".").map(Number)
+    return (
+      a === 0 ||
+      a === 127 ||
+      a === 10 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 169 && b === 254) ||
+      a >= 224 // multicast + reserved
+    )
+  }
+  const lower = ip.toLowerCase()
+  return (
+    lower === "::1" ||
+    lower === "::" ||
+    lower.startsWith("fe80") || // link-local
+    lower.startsWith("fc") || // unique-local fc00::/7
+    lower.startsWith("fd")
+  )
+}
+
+// SSRF guard for /custom-model-proxy (which relays to an arbitrary url): block
+// non-http(s) schemes and targets that resolve to internal addresses. Set
+// CUSTOM_MODEL_PROXY_ALLOW_PRIVATE=1 to allow private targets on trusted nets.
+const targetRejectionReason = async (target: URL): Promise<string | null> => {
+  if (target.protocol !== "http:" && target.protocol !== "https:") {
+    return "only http(s) targets are allowed"
+  }
+  if (process.env.CUSTOM_MODEL_PROXY_ALLOW_PRIVATE === "1") return null
+  const host = target.hostname.replace(/^\[|\]$/g, "") // strip IPv6 brackets
+  let addresses: string[]
+  try {
+    addresses = isIP(host)
+      ? [host]
+      : (await lookup(host, { all: true })).map((a) => a.address)
+  } catch {
+    return "could not resolve target host"
+  }
+  if (addresses.some(isPrivateIp)) {
+    return "target resolves to a private or reserved address"
+  }
+  return null
+}
 
 export const isForwardableHeader = (name: string) => {
   const k = name.toLowerCase()
@@ -275,6 +337,14 @@ app.post(
   ),
   async (c) => {
     const { url } = c.req.valid("query")
+    const target = new URL(url)
+
+    // SSRF guard: this endpoint relays to an arbitrary url, so block
+    // non-http(s) schemes and internal addresses (loopback/metadata/LAN)
+    const rejection = await targetRejectionReason(target)
+    if (rejection) {
+      return c.text(rejection, 403)
+    }
 
     // same hardening as the path-prefix route: filtered headers (no
     // x-proxy-token / infra leak to the arbitrary target), timeout, and
@@ -282,7 +352,7 @@ app.post(
     const res = await fetchWithTimeout(url, {
       method: c.req.method,
       body: c.req.raw.body,
-      headers: buildForwardHeaders(c.req.raw.headers, new URL(url)),
+      headers: buildForwardHeaders(c.req.raw.headers, target),
       timeout: DEFAULT_TIMEOUT,
     })
 

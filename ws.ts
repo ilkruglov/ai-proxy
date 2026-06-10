@@ -5,6 +5,10 @@ import { isForwardableHeader, isAuthorized, proxies } from "./main"
 
 const CONNECT_TIMEOUT = 15000
 
+// close idle WebSocket tunnels so abandoned upgrades can't pin file
+// descriptors forever; generous so active realtime sessions aren't cut
+const WS_IDLE_TIMEOUT_MS = Number(process.env.WS_IDLE_TIMEOUT_MS || 600000)
+
 // Open a connection to the upstream: TLS for https targets, a plain
 // socket for http ones (local upstreams in tests/dev). Raw sockets
 // don't honor https_proxy the way fetch does with NODE_USE_ENV_PROXY,
@@ -170,6 +174,14 @@ export const handleUpgrade = async (
   }
   socket.pipe(upstream)
   upstream.pipe(socket)
+
+  // tear both sides down on idle so abandoned tunnels don't leak fds
+  const onIdle = () => {
+    socket.destroy()
+    upstream.destroy()
+  }
+  socket.setTimeout(WS_IDLE_TIMEOUT_MS, onIdle)
+  upstream.setTimeout(WS_IDLE_TIMEOUT_MS, onIdle)
 
   upstream.on("error", () => socket.destroy())
   upstream.on("close", () => socket.destroy())

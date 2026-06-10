@@ -29,6 +29,9 @@ COPY --from=builder /app/dist ./dist
 ENV NODE_ENV=production
 ENV PORT=3000
 
+# drop root: the node base image ships an unprivileged "node" user
+USER node
+
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD curl -fsS "http://127.0.0.1:${PORT}/" || exit 1
 

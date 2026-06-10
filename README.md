@@ -75,7 +75,20 @@ EXTRA_PROXIES='[{"pathSegment":"foo","target":"https://api.foo.example","timeout
 
 ### Authentication
 
-By default the proxy is open. Set `PROXY_AUTH_TOKEN` to require a shared secret on every request (HTTP and WebSocket) in the `x-proxy-token` header; the header is stripped before forwarding. The root path `/` stays open for health checks. Strongly recommended when exposing the proxy publicly — `/custom-model-proxy` can relay requests to arbitrary URLs.
+By default the proxy is **open** (anyone who can reach it can use it). Set `PROXY_AUTH_TOKEN` to require a shared secret on every request (HTTP and WebSocket) in the `x-proxy-token` header; the header is stripped before forwarding. The root path `/` stays open for health checks.
+
+> **Set `PROXY_AUTH_TOKEN` whenever the proxy is reachable by anyone but you.** Without it, `/custom-model-proxy` is an open relay that anyone can use to send requests through your server, and the path-prefix routes will spend your upstream API quota for them.
+
+### Security tuning
+
+| Env                                | Default              | Purpose                                                                                           |
+| ---------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------- |
+| `PROXY_AUTH_TOKEN`                 | _(unset, open)_      | Shared secret required in the `x-proxy-token` header.                                             |
+| `MAX_BODY_BYTES`                   | `104857600` (100 MB) | Reject request bodies larger than this with `413` (caps memory/bandwidth abuse).                  |
+| `WS_IDLE_TIMEOUT_MS`               | `600000` (10 min)    | Close WebSocket tunnels with no traffic for this long (frees abandoned sockets).                  |
+| `CUSTOM_MODEL_PROXY_ALLOW_PRIVATE` | _(unset)_            | When `1`, lets `/custom-model-proxy` reach private/loopback addresses. Leave unset in production. |
+
+`/custom-model-proxy` relays to an arbitrary `?url=`. It only accepts `http(s)` and, unless `CUSTOM_MODEL_PROXY_ALLOW_PRIVATE=1`, refuses targets that resolve to loopback, link-local, cloud-metadata or RFC1918 addresses (SSRF protection). The path-prefix routes are restricted to their configured upstreams.
 
 ## Hosted by ChatWise
 
